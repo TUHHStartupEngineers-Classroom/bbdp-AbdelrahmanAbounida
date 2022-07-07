@@ -21,9 +21,9 @@ library(quantmod)
 library(plotly)
 
 # 1.0 GET STOCK LIST ----
+install.packages("quantmod")
 
-
-
+install.packages("tinytex")
 # 2.0 EXTRACT SYMBOL BASED ON USER INPUT ----
 
 
