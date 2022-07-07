@@ -77,7 +77,7 @@ fluidPage(
   dateRangeInput(inputId = "date_range", 
                label   = h4("Date Range"), 
                start   = "2018-01-01", 
-               end     = lubridate::today(),        
+               end     = max(bike_orderlines_tbl$order_date),       
                min     = min(bike_orderlines_tbl$order_date), 
                max     = max(bike_orderlines_tbl$order_date), 
                startview = "year"),
