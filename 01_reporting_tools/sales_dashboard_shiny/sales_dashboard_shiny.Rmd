@@ -1,0 +1,523 @@
+---
+title: "Sales Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+ 
+ 
+ 
+```{r setup, include=FALSE}
+library(flexdashboard)
+
+# Core
+library(tidyverse)
+
+# Interactive Visualizations
+library(plotly)
+library(lubridate)
+# Spatial Data
+library(raster)
+library(sf)
+library(shiny)
+library(shinydashboard)
+library(rsconnect)
+
+
+# connect to shinyapp
+
+rsconnect::setAccountInfo(
+  name='abdelrahmanabounida',
+  token='AFF16870C5D3CF4B3B338FB4F70E9479',
+  secret='x0/iMrG3mU4eDuXPKVsCvo71C0e0jrco+O3DsQhn')
+
+
+
+# Currency formatting
+format_to_euro <- function(x, suffix = " €") {
+  
+  scales::dollar(x,
+                 suffix       = suffix,
+                 prefix       = "",
+                 big.mark     = ".",
+                 decimal.mark = ",")
+}
+
+euro_format <- function(scale        = 1,
+                        prefix       = "",
+                        suffix       = " €",
+                        big.mark     = ".",
+                        decimal.mark = ",") {
+  
+  scales::dollar_format(suffix       = suffix,
+                        prefix       = prefix,
+                        big.mark     = big.mark,
+                        decimal.mark = decimal.mark,
+                        scale        = scale)
+  
+}
+
+```
+
+
+```{r}
+
+bikes_tbl      <- readRDS("data/bikes_tbl.rds")
+bikeshops_tbl  <- readRDS("data/bikeshops_tbl.rds")
+orderlines_tbl <- readRDS("data/orderlines_tbl.rds")
+
+bike_orderlines_tbl <- orderlines_tbl %>%
+  left_join(bikes_tbl,     by = c("product_id" = "bike_id")) %>%
+  left_join(bikeshops_tbl, by = c("customer_id" = "bikeshop_id")) %>%
+  mutate(total_price = price_euro * quantity)
+
+
+germany_sp <- getData('GADM', country='DE', level=1) 
+germany_sf <- st_as_sf(germany_sp) %>% 
+mutate(VARNAME_1 = ifelse(is.na(VARNAME_1), NAME_1, VARNAME_1)) 
+
+```
+
+
+Sidebar {.sidebar}
+=======================================================================
+
+```{r}
+
+# Chart1 Filters 
+fluidPage(
+  
+  h2("Chart1 Filters"),
+  
+  selectInput(inputId ="select_year", label = h4("Year"), 
+    choices = list("2015"="2015","2016"="2016","2017"="2017","2018"="2018","2019"="2019"), 
+    selected = 1),
+  
+  checkboxGroupInput(inputId ="states", label = h4("State"), 
+    choices = list("	
+Baden-Württemberg" = "Baden-Württemberg", "Hamburg" = "Hamburg", "North Rhine-Westphalia" = "North Rhine-Westphalia", "Saxony" = "Saxony","Schleswig-Holstein"="Schleswig-Holstein","Baden-Württemberg"="Baden-Württemberg","Bavaria"="Bavaria","Berlin"="Berlin","Bremen"="Bremen","Hesse","Lower Saxony"="Lower Saxony","Mecklenburg-Western Pomerania"="Mecklenburg-Western Pomerania","Saxony"="Saxony","Saxony-Anhalt"="Saxony-Anhalt"),
+    selected = "Berlin"),
+    hr()
+)
+#######################################################################
+
+# Chart2 Filters 
+
+fluidPage( 
+   h2("Chart2 Filters"),
+  checkboxGroupInput(inputId ="checkGroup", label = h4("Bike Type"), 
+    choices = list("Mountain" = "Mountain", "Road" = "Road", "Hybrid/City" = "Hybrid/City", "E-Bikes" = "E-Bikes", "Gravel" = "Gravel"),
+    selected = "Mountain"),
+  
+  dateRangeInput(inputId = "dates", 
+               label   = h4("Date Range"), 
+               start   = "2018-01-01", 
+               end     = max(bike_orderlines_tbl$order_date),       
+               min     = min(bike_orderlines_tbl$order_date), 
+               max     = max(bike_orderlines_tbl$order_date), 
+               startview = "year"),
+  hr()
+)
+
+#######################################################################
+
+# Chart3 Filters 
+
+fluidPage( 
+  h2("Chart3 Filters"),
+  
+  selectInput(inputId ="select_type", label = h3("Type1"), 
+    choices = list("Land"='Land',"Freistaat"='Freistaat',"Freie und Hansestadt"='Freie und Hansestadt','Freie Hansestadt'='Freie Hansestadt'), 
+    selected = 'Land'),
+
+  hr()
+)
+#######################################################################
+
+# Chart4 Filters 
+
+fluidPage(
+  h2("Chart4 Filters"),
+  selectInput(inputId ="select", label = h3("Time Unit"), 
+    choices = list("Quartly"=3,"Monthly"=2,"Weekly"=1), 
+    selected = 1),
+  
+  actionButton(inputId = "reset", 
+             label   = "Close"
+             )
+  
+)
+
+```
+
+```{r}
+#################################### Server Side ################################################
+
+# 1- reset
+
+observeEvent(eventExpr = input$reset, handlerExpr = {
+  
+    updateDateRangeInput(session = session, 
+                       inputId = "dates", 
+                       start   = "2015-01-01", 
+                       end     = "2018-01-01")
+  
+  
+  updateCheckboxGroupInput(session  = session, 
+                           inputId  = "checkGroup", 
+                           selected = 1)
+  
+  
+  updateselectInput(session = session,
+                    inputId = "select",
+                    selected = 1)
+  
+  
+})
+
+```
+
+
+```{r reactive}
+
+########################################
+# Chart1 Filters
+#######################################
+
+
+######################### Filter by state, year #################################
+
+df_filter_by_state_year <- reactive({
+  
+x <- left_join(orderlines_tbl,bikes_tbl, by = c("product_id" = "bike_id"),header=TRUE)
+
+bike_orderlines_wrangled_tbl <- x %>% left_join(bikeshops_tbl, by= c("customer_id" = "bikeshop_id"))
+
+bike_orderlines_wrangled_tbl <- bike_orderlines_wrangled_tbl  %>% dplyr::filter(state %in% input$states)
+
+
+bike_orderlines_wrangled_tbl <- bike_orderlines_wrangled_tbl %>% mutate('Total.Price' = price_euro * quantity)
+
+
+bike_orderlines_wrangled_tbl2 <- bike_orderlines_wrangled_tbl %>% 
+  dplyr::select(order_date,state,city, Total.Price)  %>% 
+  mutate(year = year(order_date)) %>% 
+  dplyr::select(year,state,Total.Price)
+
+
+tot_sales_by_state_year <- bike_orderlines_wrangled_tbl2 %>% group_by(year,state) %>%
+  summarise(Total.Price = sum(Total.Price))
+
+df <- tot_sales_by_state_year %>% filter(year %in% input$select_year)
+
+return(df)
+
+})
+
+########################################
+# Chart2 Filters
+#######################################
+
+######################### Filter by category #################################
+
+
+df_filter_by_cat <- reactive({
+  
+  
+x <- left_join(orderlines_tbl,bikes_tbl, by = c("product_id" = "bike_id"),header=TRUE)
+
+bike_orderlines_wrangled_tbl <- x %>% left_join(bikeshops_tbl, by= c("customer_id" = "bikeshop_id"))
+
+df <- bike_orderlines_wrangled_tbl  %>% filter(category_1 %in% input$checkGroup) # filter category here #### note
+
+df <- df %>% mutate('Total.Price' = price_euro * quantity)
+
+return(df)
+})
+
+
+######################### Filter by Date #################################
+
+df_filter_by_date <- reactive({
+  
+  
+x <- left_join(orderlines_tbl,bikes_tbl, by = c("product_id" = "bike_id"),header=TRUE)
+
+bike_orderlines_wrangled_tbl <- x %>% left_join(bikeshops_tbl, by= c("customer_id" = "bikeshop_id"))
+
+
+bike_orderlines_wrangled_tbl <- bike_orderlines_wrangled_tbl %>% mutate('Total.Price' = price_euro * quantity)
+
+
+bike_orderlines_wrangled_tbl2 <- bike_orderlines_wrangled_tbl %>% 
+  filter(order_date >= input$dates[1] & order_date <= input$dates[2])  %>%  #### filter date here 
+  dplyr::select(order_date,state,city, Total.Price)  %>% 
+  mutate(year = year(order_date)) %>% 
+  dplyr::select(year,state,Total.Price)
+
+
+df <- bike_orderlines_wrangled_tbl2 %>% group_by(year,state) %>%
+  summarise(Total.Price = sum(Total.Price))
+
+return(df)
+})
+
+######################### Filter by category, Date #################################
+df_filter_by_date_cat <- reactive({
+  
+x <- left_join(orderlines_tbl,bikes_tbl, by = c("product_id" = "bike_id"),header=TRUE)
+
+bike_orderlines_wrangled_tbl <- x %>% left_join(bikeshops_tbl, by= c("customer_id" = "bikeshop_id"))
+
+cat <- bike_orderlines_wrangled_tbl  %>% filter(category_1 %in% input$checkGroup) # filter category here #### note
+
+
+bike_orderlines_wrangled_tbl <- cat %>% mutate('Total.Price' = price_euro * quantity)
+
+
+bike_orderlines_wrangled_tbl2 <- bike_orderlines_wrangled_tbl %>% 
+  filter(order_date >= input$dates[1] & order_date <= input$dates[2])  %>%  #### filter date here 
+  dplyr::select(order_date,state,city, Total.Price)  %>% 
+  mutate(year = year(order_date)) %>% 
+  dplyr::select(year,state,Total.Price)
+
+
+df <- bike_orderlines_wrangled_tbl2 %>% group_by(year,state) %>%
+  summarise(Total.Price = sum(Total.Price))
+
+return(df)
+  
+})
+
+####################### Filter by type1 ################################
+
+df_filter_by_type <- reactive({
+  
+  geo_plot_tbl <- bike_orderlines_tbl %>% 
+                  group_by(state) %>%
+                  summarise(total_revenue = sum(total_price)) %>%
+                  ungroup() %>%
+                  right_join(germany_sf, by = c("state" = "VARNAME_1")) %>% 
+                  mutate(total_revenue = ifelse(is.na(total_revenue), 0, total_revenue)) %>% 
+                  mutate(label_text = str_glue("State: {state}
+                                         Revenue: {format_to_euro(total_revenue)}")) %>% 
+                  st_as_sf()
+  
+  df <- geo_plot_tbl %>% filter(TYPE_1 %in% input$select_type)
+  
+  geo_plot_tbl <- df %>% 
+                  group_by(state) %>%
+                  summarise(total_revenue = sum(total_price)) %>%
+                  ungroup() %>%
+                  right_join(germany_sf, by = c("state" = "VARNAME_1")) %>% 
+                  mutate(total_revenue = ifelse(is.na(total_revenue), 0, total_revenue)) %>% 
+                  mutate(label_text = str_glue("State: {state}
+                                         Revenue: {format_to_euro(total_revenue)}")) %>% 
+                  st_as_sf()
+  
+  return(geo_plot_tbl)
+})
+
+```
+
+
+Page 1
+=======================================================================
+
+
+
+Column {data-width=800}
+---------------------------------------------------------------
+
+### 1- Sales by Location, Date
+
+
+```{r}
+
+
+ renderPlotly({
+  
+  dataset <- df_filter_by_state_year()
+  
+  dataset %>% ggplot(aes(x = year, y = Total.Price, fill = state)) +
+  geom_col() + 
+  facet_wrap(~ state) +
+  scale_y_continuous(labels = scales::dollar_format(big.mark = ".", 
+                                                    decimal.mark = ",", 
+                                                    prefix = "", 
+                                                    suffix = " €")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(
+    title = "Revenue by year",
+  )
+})
+
+```
+
+### 2- Sales by Location & Category
+
+```{r}
+
+ renderPlotly({
+  
+  dataset <- df_filter_by_date_cat()
+  
+  dataset %>% ggplot(aes(x = state, y = Total.Price)) +
+  geom_col(fill = "#2DC6D6")  + # Adding labels to the bars
+  geom_smooth(method = "lm", se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(
+    title = "Revenue by State ",
+  )
+})
+
+```
+
+
+Column {data-width=800}
+---------------------------------------------------------------
+  
+  
+### 3- Total Sales Trend
+
+```{r}
+
+renderPlotly({
+  
+  geo_plot_tbl <- bike_orderlines_tbl %>% 
+                  group_by(state) %>%
+                  summarise(total_revenue = sum(total_price)) %>%
+                  ungroup() %>%
+                  right_join(germany_sf, by = c("state" = "VARNAME_1")) %>% 
+                  mutate(total_revenue = ifelse(is.na(total_revenue), 0, total_revenue)) %>% 
+                  mutate(label_text = str_glue("State: {state}
+                                         Revenue: {format_to_euro(total_revenue)}")) %>% 
+                  st_as_sf()
+  
+  df <- geo_plot_tbl %>% filter(TYPE_1 %in% input$select_type)
+  
+  
+  plot_ly(df, 
+        split      = ~NAME_1, 
+        color      = ~total_revenue,
+        colors     = "Blues",
+        stroke     = I("black"),
+        hoverinfo  = 'text', 
+        text       = ~label_text, 
+        hoveron    = "fills", 
+        showlegend = FALSE) 
+})
+```
+
+```{r}
+
+geo_plot_tbl <- bike_orderlines_tbl %>% 
+                  group_by(state) %>%
+                  summarise(total_revenue = sum(total_price)) %>%
+                  ungroup() %>%
+                  right_join(germany_sf, by = c("state" = "VARNAME_1")) %>% 
+                  mutate(total_revenue = ifelse(is.na(total_revenue), 0, total_revenue)) %>% 
+                  mutate(label_text = str_glue("State: {state}
+                                         Revenue: {format_to_euro(total_revenue)}")) %>% 
+                  st_as_sf()
+```
+
+
+```{r}
+plot_ly(geo_plot_tbl, 
+        split      = ~NAME_1, 
+        color      = ~total_revenue,
+        colors     = "Blues",
+        stroke     = I("black"),
+        hoverinfo  = 'text', 
+        text       = ~label_text, 
+        hoveron    = "fills", 
+        showlegend = FALSE) 
+```
+
+
+### 4- Over Time
+
+```{r}
+
+format_to_euro <- function(x, suffix = " €") {
+  
+  scales::dollar(x,
+                 suffix       = suffix,
+                 prefix       = "",
+                 big.mark     = ".",
+                 decimal.mark = ",")
+}
+
+euro_format <- function(scale        = 1,
+                        prefix       = "",
+                        suffix       = " €",
+                        big.mark     = ".",
+                        decimal.mark = ",") {
+  
+  scales::dollar_format(suffix       = suffix,
+                        prefix       = prefix,
+                        big.mark     = big.mark,
+                        decimal.mark = decimal.mark,
+                        scale        = scale)
+  
+}
+
+renderPlot({
+  
+  if(input$select == '1'){
+       
+    unit = "weekly"
+    date_format = "%B %d, %Y"
+  }
+  else{
+    if(input$select == '2'){
+      unit = "monthly"
+      date_format = "%B %Y"
+    }
+    else{
+     unit = period(months = 3)
+     date_format = "%B %d, %Y"
+    }
+  }
+  
+  data_tbl <- bike_orderlines_tbl %>%
+    
+    dplyr::select(order_date, total_price) %>%
+    
+    mutate(date_rounded = floor_date(order_date, unit = unit)) %>%
+    
+    group_by(date_rounded) %>%
+    summarise(total_sales = sum(total_price)) %>%
+    ungroup() %>%
+    
+    mutate(label_text = str_glue("Sales: {format_to_euro(total_sales)}
+                                 Date: {date_rounded %>% format(date_format)}"))
+  
+  # Make Plot
+  data_tbl %>%
+    ggplot(aes(x = date_rounded, y = total_sales)) +
+    
+    # Geoms
+    geom_point(aes(text = label_text), color = "#2C3E50") +
+    geom_smooth(method = "loess", span = 0.2) +
+    
+    # Formatting
+    scale_y_continuous(labels = euro_format()) +
+    expand_limits(y = 0) +
+    labs(
+      title = "Total Sales",
+      y = "Revenue (Euro)",
+      x = ""
+    )
+
+}) 
+  
+  
+
+  
+
+```
+
