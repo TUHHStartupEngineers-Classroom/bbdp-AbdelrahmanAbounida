@@ -1,3 +1,12 @@
+
+# this is a helper function 
+
+get_indicies <- function(){
+  index_valid <- c("DAX", "SP500", "DOW", "NASDAQ")
+  return(index_valid)
+}
+
+
 get_stock_list <-
 function(stock_index = "DAX") {
   
@@ -80,8 +89,9 @@ function(stock_symbol,
     # Select the date and the adjusted column
     dplyr::select(date, adjusted, mavg_short, mavg_long, currency)
 }
+
 plot_stock_data <-
-function(stock_data) {
+function(stock_data){
   g <- stock_data %>% 
     
     # convert to long format
@@ -91,9 +101,10 @@ function(stock_data) {
                  names_ptypes = list(legend = factor())) %>% 
     
     # ggplot
-    ggplot(aes(x=date,y=value, group = legend)) +
+    ggplot(aes(x=date,y=value, group = legend,color="red")) +
     scale_y_continuous(labels = currency_format("dollar")) +
     geom_line(aes(linetype = legend)) +
+    scale_colour_brewer(palette = "Set1")+
     labs(y = "Adjusted Share Price", x = "")
   
   ggplotly(g) 
