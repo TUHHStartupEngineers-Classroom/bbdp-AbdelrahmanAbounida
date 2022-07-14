@@ -1,0 +1,13 @@
+name: Stock__Analyzer
+title: Stock__Analyzer
+username:
+account: abdelrahmanabounida
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 6639350
+bundleId: 6096586
+url: https://abdelrahmanabounida.shinyapps.io/Stock__Analyzer/
+when: 1657759959.42731
+lastSyncTime: 1657759959.42733
+asMultiple: FALSE
+asStatic: FALSE
